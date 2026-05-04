@@ -57,6 +57,7 @@ ENV PATH /opt/conda/bin:$PATH
 ### Add all install scripts for further steps
 ADD ./src/common/install/ $INST_SCRIPTS/
 ADD ./src/debian/install/ $INST_SCRIPTS/
+RUN chmod +x $INST_SCRIPTS/*.sh
 
 ### Install some common tools
 RUN $INST_SCRIPTS/tools.sh
@@ -81,8 +82,10 @@ RUN $INST_SCRIPTS/libnss_wrapper.sh
 ADD ./src/common/scripts $STARTUPDIR
 RUN $INST_SCRIPTS/set_user_permission.sh $STARTUPDIR $HOME
 
-### Create conda environment
-RUN conda create -n Rope python=3.10.13 && conda clean --all -y
+### Create conda environment (accept Anaconda channel ToS for non-interactive builds)
+RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main && \
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r && \
+    conda create -n Rope python=3.10.13 -y && conda clean --all -y
 
 ### Activate the environment
 ENV CONDA_DEFAULT_ENV Rope

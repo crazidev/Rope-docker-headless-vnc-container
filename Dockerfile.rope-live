@@ -1,0 +1,125 @@
+# syntax=docker/dockerfile:1
+# Rope-Live + headless VNC + Larix ingest (MediaMTX RTMP/SRT -> FFmpeg -> v4l2loopback)
+# Build (enables pip wheel cache between rebuilds): DOCKER_BUILDKIT=1 docker build -f Dockerfile.rope-live -t rope-live-vnc:latest .
+# INSTALL_TENSORRT=1 uses full requirements.txt; default only omits a bare "tensorrt" line if present (tensorrt-cu11 is always kept — required for imports).
+
+FROM nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04
+
+ENV REFRESHED_AT=2026-05-04
+
+LABEL io.k8s.description="Rope-Live with VNC, Larix RTMP/SRT ingest, MediaMTX, Jupyter, filebrowser" \
+      io.k8s.display-name="Rope-Live headless VNC" \
+      io.openshift.expose-services="6901:http,5901:xvnc,1935:rtmp,8554:rtsp,8890:udp" \
+      io.openshift.non-scalable=true
+
+ARG INSTALL_TENSORRT=0
+ENV INSTALL_TENSORRT=${INSTALL_TENSORRT}
+
+ENV DISPLAY=:1 \
+    VNC_PORT=5901 \
+    NO_VNC_PORT=6901 \
+    HOME=/workspace \
+    TERM=xterm \
+    STARTUPDIR=/dockerstartup \
+    INST_SCRIPTS=/workspace/install \
+    NO_VNC_HOME=/workspace/noVNC \
+    DEBIAN_FRONTEND=noninteractive \
+    VNC_COL_DEPTH=24 \
+    VNC_PW=vncpassword \
+    VNC_VIEW_ONLY=false \
+    TZ=UTC \
+    ROPE_LIVE_HOME=/opt/Rope-Live \
+    FACESWAP_BACKEND=rope-live \
+    INGEST_MODE=rtmp \
+    RTMP_PATH=live/ingest \
+    V4L2_DEVICE=/dev/video10
+
+EXPOSE 5901/tcp 6901/tcp 8080/tcp 8585/tcp 1935/tcp 8554/tcp
+EXPOSE 8890/udp
+
+WORKDIR $HOME
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget \
+    git \
+    build-essential \
+    ca-certificates \
+    curl \
+    unzip \
+    ffmpeg \
+    jq \
+    tzdata \
+    kmod \
+    pciutils \
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN ln -fs /usr/share/zoneinfo/$TZ /etc/localtime && dpkg-reconfigure -f noninteractive tzdata || true
+
+RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/miniconda.sh && \
+    bash /tmp/miniconda.sh -b -p /opt/conda && rm /tmp/miniconda.sh
+
+ENV PATH=/opt/conda/bin:$PATH
+
+ADD ./src/common/install/ $INST_SCRIPTS/
+ADD ./src/debian/install/ $INST_SCRIPTS/
+RUN chmod +x $INST_SCRIPTS/*.sh
+
+RUN $INST_SCRIPTS/tools.sh
+ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
+
+RUN $INST_SCRIPTS/install_custom_fonts.sh
+RUN $INST_SCRIPTS/tigervnc.sh
+RUN $INST_SCRIPTS/no_vnc_1.5.0.sh
+RUN $INST_SCRIPTS/firefox.sh
+RUN $INST_SCRIPTS/xfce_ui.sh
+ADD ./src/common/xfce/ $HOME/
+
+RUN $INST_SCRIPTS/libnss_wrapper.sh
+ADD ./src/common/scripts $STARTUPDIR
+RUN $INST_SCRIPTS/set_user_permission.sh $STARTUPDIR $HOME
+
+RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main && \
+    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r && \
+    conda create -n RopeLive python=3.10.13 -y && conda clean --all -y
+
+ENV CONDA_DEFAULT_ENV=RopeLive
+RUN echo "conda activate RopeLive" >> /root/.bashrc && echo "source /opt/conda/etc/profile.d/conda.sh" >> /root/.bashrc
+ENV PATH=/opt/conda/envs/RopeLive/bin:$PATH
+
+RUN git clone --depth 1 https://github.com/argenspin/Rope-Live.git /opt/Rope-Live
+
+COPY ./src/rope-live/install-rope-live-pip.sh /tmp/install-rope-live-pip.sh
+RUN --mount=type=cache,target=/root/.cache/pip \
+    bash /tmp/install-rope-live-pip.sh && rm /tmp/install-rope-live-pip.sh
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install jupyterlab
+
+RUN curl -fsSL https://raw.githubusercontent.com/filebrowser/get/master/get.sh | bash
+
+ARG MEDIAMTX_VERSION=v1.18.1
+RUN curl -sL "https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}/mediamtx_${MEDIAMTX_VERSION}_linux_amd64.tar.gz" | tar xz -C /tmp \
+    && install -m0755 /tmp/mediamtx /usr/local/bin/mediamtx \
+    && mv /tmp/mediamtx.yml /etc/mediamtx.yml \
+    && rm -f /tmp/LICENSE
+
+# Desktop RTMP/virtual-cam testing from inside VNC (e.g. Media Source -> rtmp://127.0.0.1:1935/...)
+RUN apt-get update && apt-get install -y --no-install-recommends obs-studio \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY ./src/rope-live/bootstrap-workspace.sh $STARTUPDIR/bootstrap-workspace.sh
+COPY ./src/rope-live/setup-v4l2.sh $STARTUPDIR/setup-v4l2.sh
+COPY ./src/rope-live/start-ingest.sh $STARTUPDIR/start-ingest.sh
+COPY ./src/rope-live/vnc_startup_rope_live.sh $STARTUPDIR/vnc_startup.sh
+RUN chmod 0755 $STARTUPDIR/bootstrap-workspace.sh $STARTUPDIR/setup-v4l2.sh $STARTUPDIR/start-ingest.sh $STARTUPDIR/vnc_startup.sh
+
+ENV VNC_RESOLUTION=2560x1600
+
+ENTRYPOINT ["/dockerstartup/vnc_startup.sh"]
+CMD ["--wait"]
