@@ -27,8 +27,6 @@ if [[ -f "$STAMP" ]] && [[ -x "${CONDA_ENV_PREFIX}/bin/python" ]] && [[ -f "${RO
   exit 0
 fi
 
-exec > >(tee -a "$LOG") 2>&1
-
 echo "========== Rope-Live runtime install started $(date -Is) =========="
 
 source /opt/conda/etc/profile.d/conda.sh
