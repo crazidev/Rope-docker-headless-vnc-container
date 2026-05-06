@@ -1,14 +1,15 @@
 # syntax=docker/dockerfile:1
-# Rope-Live + headless VNC + Larix ingest (MediaMTX RTMP/SRT -> FFmpeg -> v4l2loopback)
-# Build (enables pip wheel cache between rebuilds): DOCKER_BUILDKIT=1 docker build -f Dockerfile.rope-live -t rope-live-vnc:latest .
-# INSTALL_TENSORRT=1 uses full requirements.txt; default only omits a bare "tensorrt" line if present (tensorrt-cu11 is always kept — required for imports).
+# Slim image: CUDA + Miniconda + VNC/desktop + MediaMTX + FFmpeg + filebrowser.
+# Conda env, Rope-Live repo, PyTorch/pip stack, and Jupyter install at first boot under /workspace
+# (see deferred-install.sh; logs in /workspace/data/install.log).
+# Build: DOCKER_BUILDKIT=1 docker build -f Dockerfile.rope-live -t rope-live-vnc:latest .
 
 FROM nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04
 
 ENV REFRESHED_AT=2026-05-04
 
-LABEL io.k8s.description="Rope-Live with VNC, Larix RTMP/SRT ingest, MediaMTX, Jupyter, filebrowser" \
-      io.k8s.display-name="Rope-Live headless VNC" \
+LABEL io.k8s.description="Rope-Live VNC; GPU conda+pip on volume at runtime" \
+      io.k8s.display-name="Rope-Live headless VNC (slim)" \
       io.openshift.expose-services="6901:http,5901:xvnc,1935:rtmp,8554:rtsp,8890:udp" \
       io.openshift.non-scalable=true
 
@@ -28,7 +29,8 @@ ENV DISPLAY=:1 \
     VNC_PW=vncpassword \
     VNC_VIEW_ONLY=false \
     TZ=UTC \
-    ROPE_LIVE_HOME=/opt/Rope-Live \
+    CONDA_ENV_PREFIX=/workspace/data/conda/envs/RopeLive \
+    ROPE_LIVE_HOME=/workspace/data/Rope-Live \
     FACESWAP_BACKEND=rope-live \
     INGEST_MODE=rtmp \
     RTMP_PATH=live/ingest \
@@ -39,10 +41,10 @@ EXPOSE 8890/udp
 
 WORKDIR $HOME
 
+# build-essential is installed at first boot (deferred-install.sh) with pip; keeps base layer smaller.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     git \
-    build-essential \
     ca-certificates \
     curl \
     unzip \
@@ -66,6 +68,8 @@ RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -
 
 ENV PATH=/opt/conda/bin:$PATH
 
+RUN echo 'source /opt/conda/etc/profile.d/conda.sh' >> /root/.bashrc
+
 ADD ./src/common/install/ $INST_SCRIPTS/
 ADD ./src/debian/install/ $INST_SCRIPTS/
 RUN chmod +x $INST_SCRIPTS/*.sh
@@ -84,23 +88,6 @@ RUN $INST_SCRIPTS/libnss_wrapper.sh
 ADD ./src/common/scripts $STARTUPDIR
 RUN $INST_SCRIPTS/set_user_permission.sh $STARTUPDIR $HOME
 
-RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main && \
-    conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r && \
-    conda create -n RopeLive python=3.10.13 -y && conda clean --all -y
-
-ENV CONDA_DEFAULT_ENV=RopeLive
-RUN echo "conda activate RopeLive" >> /root/.bashrc && echo "source /opt/conda/etc/profile.d/conda.sh" >> /root/.bashrc
-ENV PATH=/opt/conda/envs/RopeLive/bin:$PATH
-
-RUN git clone --depth 1 https://github.com/argenspin/Rope-Live.git /opt/Rope-Live
-
-COPY ./src/rope-live/install-rope-live-pip.sh /tmp/install-rope-live-pip.sh
-RUN --mount=type=cache,target=/root/.cache/pip \
-    bash /tmp/install-rope-live-pip.sh && rm /tmp/install-rope-live-pip.sh
-
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install jupyterlab
-
 RUN curl -fsSL https://raw.githubusercontent.com/filebrowser/get/master/get.sh | bash
 
 ARG MEDIAMTX_VERSION=v1.18.1
@@ -109,15 +96,16 @@ RUN curl -sL "https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMT
     && mv /tmp/mediamtx.yml /etc/mediamtx.yml \
     && rm -f /tmp/LICENSE
 
-# Desktop RTMP/virtual-cam testing from inside VNC (e.g. Media Source -> rtmp://127.0.0.1:1935/...)
-RUN apt-get update && apt-get install -y --no-install-recommends obs-studio \
-    && rm -rf /var/lib/apt/lists/*
-
 COPY ./src/rope-live/bootstrap-workspace.sh $STARTUPDIR/bootstrap-workspace.sh
+COPY ./src/rope-live/deferred-install.sh $STARTUPDIR/deferred-install.sh
+COPY ./src/rope-live/install-rope-live-pip.sh $STARTUPDIR/install-rope-live-pip.sh
+COPY ./src/rope-live/install-obs.sh $STARTUPDIR/install-obs.sh
 COPY ./src/rope-live/setup-v4l2.sh $STARTUPDIR/setup-v4l2.sh
 COPY ./src/rope-live/start-ingest.sh $STARTUPDIR/start-ingest.sh
 COPY ./src/rope-live/vnc_startup_rope_live.sh $STARTUPDIR/vnc_startup.sh
-RUN chmod 0755 $STARTUPDIR/bootstrap-workspace.sh $STARTUPDIR/setup-v4l2.sh $STARTUPDIR/start-ingest.sh $STARTUPDIR/vnc_startup.sh
+RUN chmod 0755 $STARTUPDIR/bootstrap-workspace.sh $STARTUPDIR/deferred-install.sh \
+    $STARTUPDIR/install-rope-live-pip.sh $STARTUPDIR/install-obs.sh \
+    $STARTUPDIR/setup-v4l2.sh $STARTUPDIR/start-ingest.sh $STARTUPDIR/vnc_startup.sh
 
 ENV VNC_RESOLUTION=2560x1600
 

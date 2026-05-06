@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd /opt/Rope-Live
+cd "${ROPE_LIVE_HOME:?ROPE_LIVE_HOME must be set}"
 
 req="/tmp/rope-live-requirements-filtered.txt"
 if [ "${INSTALL_TENSORRT:-0}" = "1" ]; then

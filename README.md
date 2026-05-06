@@ -59,13 +59,15 @@ The Docker image is installed with the following components:
 
 Use [`Dockerfile.rope-live`](Dockerfile.rope-live) for [**Rope-Live**](https://github.com/argenspin/Rope-Live) with the same headless VNC stack, plus **MediaMTX** so you can publish from [**Larix Broadcaster**](https://softvelum.com/larix/ios) over **RTMP** or **SRT**, decode with **FFmpeg**, and write frames to **v4l2loopback** (default `/dev/video10`) so Rope-Live / OBS can treat it like a webcam.
 
+**Heavy pieces are not in the image:** the **conda env** (`CONDA_ENV_PREFIX`, default `/workspace/data/conda/envs/RopeLive`), **Rope-Live** clone (`ROPE_LIVE_HOME`, default `/workspace/data/Rope-Live`), **pip/PyTorch/TensorRT stack**, and **JupyterLab** are installed on **first start** by [`deferred-install.sh`](src/rope-live/deferred-install.sh). All output is appended to **`/workspace/data/install.log`** and mirrored to stdout/stderr (visible in **Runpod / docker logs**). **OBS** is installed separately via [`install-obs.sh`](src/rope-live/install-obs.sh). **Mount `/workspace` on a volume** so conda/pip caches and the env survive restarts. Use **`SKIP_WORKSPACE_INSTALL=1`** to skip the conda/Rope/pip step, **`FORCE_REINSTALL=1`** to redo it, **`SKIP_OBS_INSTALL=1`** to skip OBS.
+
 ### Build
 
-Use BuildKit so **pip wheels are cached between rebuilds** (faster iteration when changing layers above the `pip install` steps):
+Use BuildKit for faster local rebuilds:
 
 ```bash
 DOCKER_BUILDKIT=1 docker build -f Dockerfile.rope-live -t rope-live-vnc:latest .
-# Optional: unfiltered requirements copy (`INSTALL_TENSORRT=1`). Default install still includes tensorrt-cu11 (required for Rope-Live imports).
+# Optional: default INSTALL_TENSORRT=1 in image env for runtime pip (TensorRT line handling in requirements).
 DOCKER_BUILDKIT=1 docker build -f Dockerfile.rope-live --build-arg INSTALL_TENSORRT=1 -t rope-live-vnc:trt .
 ```
 
@@ -80,7 +82,7 @@ On each start, [`bootstrap-workspace.sh`](src/rope-live/bootstrap-workspace.sh) 
 | `UV_CACHE_DIR=/workspace/data/cache/uv` | For [uv](https://github.com/astral-sh/uv) if you install it later. |
 | `XDG_CACHE_HOME=/workspace/data/cache/xdg` | Misc Python/tooling caches that honor XDG. |
 
-Set **`WORKSPACE_PYTHON_CACHE=0`** to skip sourcing `exports.env` (defaults to enabled). The baked-in conda env in the image is unchanged; this mainly helps **manual or scripted** `pip`/`conda`/`uv` work on a long-lived volume without redownloading everything after each stop/start.
+Set **`WORKSPACE_PYTHON_CACHE=0`** to skip sourcing `exports.env` (defaults to enabled). **`deferred-install.sh`** still runs once (unless skipped); caches speed **repeated** installs after wiping the env only if dirs on the volume are preserved.
 
 ### Ports (map all you need)
 
@@ -132,6 +134,11 @@ Use the same path in **`RTMP_PATH`** (default `live/ingest`) if you change it. A
 | `V4L2_DEVICE` | `/dev/video10` | v4l2loopback device node. |
 | `INSWAPPER_URL` | rope-assets GitHub URL | Override download URL for the swapper ONNX. |
 | `WORKSPACE_PYTHON_CACHE` | `1` | Set to `0` to disable exporting volume-backed `PIP_CACHE_DIR` / `CONDA_PKGS_DIRS` / `UV_CACHE_DIR` / `XDG_CACHE_HOME`. |
+| `SKIP_WORKSPACE_INSTALL` | `0` | Set to `1` to skip [`deferred-install.sh`](src/rope-live/deferred-install.sh) (no conda env / Rope / pip / Jupyter on volume). |
+| `FORCE_REINSTALL` | `0` | Set to `1` to remove the runtime-ready stamp and re-run deferred install. |
+| `SKIP_OBS_INSTALL` | `0` | Set to `1` to skip [`install-obs.sh`](src/rope-live/install-obs.sh). |
+| `ROPE_LIVE_HOME` | `/workspace/data/Rope-Live` | Clone path for Rope-Live. |
+| `CONDA_ENV_PREFIX` | `/workspace/data/conda/envs/RopeLive` | Conda env prefix on the volume. |
 
 ### WebRTC / WHIP
 

@@ -36,7 +36,7 @@ else
   echo "[bootstrap] inswapper_128.fp16.onnx already present"
 fi
 
-ROPE_LIVE_HOME="${ROPE_LIVE_HOME:-/opt/Rope-Live}"
+ROPE_LIVE_HOME="${ROPE_LIVE_HOME:-/workspace/data/Rope-Live}"
 if [ -d "$ROPE_LIVE_HOME" ]; then
   if [ -e "$ROPE_LIVE_HOME/models" ] && [ ! -L "$ROPE_LIVE_HOME/models" ]; then
     rm -rf "$ROPE_LIVE_HOME/models"

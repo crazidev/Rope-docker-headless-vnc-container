@@ -70,6 +70,17 @@ if [[ "${WORKSPACE_PYTHON_CACHE:-1}" != "0" ]] && [[ -f /workspace/data/cache/ex
   echo "[cache] Using volume-backed PIP_CACHE_DIR and CONDA_PKGS_DIRS (disable with WORKSPACE_PYTHON_CACHE=0)"
 fi
 
+CONDA_ENV_PREFIX="${CONDA_ENV_PREFIX:-/workspace/data/conda/envs/RopeLive}"
+ROPE_LIVE_HOME="${ROPE_LIVE_HOME:-/workspace/data/Rope-Live}"
+ROPE_PY="${CONDA_ENV_PREFIX}/bin/python"
+JUPYTER_BIN="${CONDA_ENV_PREFIX}/bin/jupyter"
+
+echo -e "\n------------------ Rope-Live runtime install (conda, clone, pip, Jupyter) ------------------"
+bash "$STARTUPDIR/deferred-install.sh"
+
+echo -e "\n------------------ OBS Studio (runtime install) ------------------"
+bash "$STARTUPDIR/install-obs.sh"
+
 echo -e "\n------------------ v4l2loopback ------------------"
 bash "$STARTUPDIR/setup-v4l2.sh"
 
@@ -123,14 +134,22 @@ $HOME/wm_startup.sh &> $STARTUPDIR/wm_startup.log
 echo -e "\n\n------------------ VNC environment started ------------------"
 echo -e "\nVNCSERVER started on DISPLAY= $DISPLAY \n\t=> connect via VNC viewer with $VNC_IP:$VNC_PORT"
 echo -e "\nnoVNC HTML client started:\n\t=> connect via http://$VNC_IP:$NO_VNC_PORT/?password=...\n"
-echo -e "Starting jupyterlab at port 8080..."
-nohup jupyter lab --port 8080 --notebook-dir=/workspace --allow-root --no-browser --ip=0.0.0.0  --NotebookApp.token='' --NotebookApp.password='' &
+if [[ -x "$JUPYTER_BIN" ]]; then
+  echo -e "Starting jupyterlab at port 8080..."
+  nohup "$JUPYTER_BIN" lab --port 8080 --notebook-dir=/workspace --allow-root --no-browser --ip=0.0.0.0 --NotebookApp.token='' --NotebookApp.password='' &
+else
+  echo "[jupyter] skipped (install incomplete or env missing; see /workspace/data/install.log)"
+fi
 echo -e "Starting filebrowser at port 8585..."
 nohup filebrowser -r /workspace -p 8585 -a 0.0.0.0 --noauth &
-echo -e "Starting Rope-Live..."
-cd "${ROPE_LIVE_HOME:-/opt/Rope-Live}"
-python Rope.py >>"$STARTUPDIR/rope-live.log" 2>&1 &
-echo "Rope-Live started in background (log: $STARTUPDIR/rope-live.log, PID $!)"
+if [[ -x "$ROPE_PY" ]] && [[ -f "${ROPE_LIVE_HOME}/Rope.py" ]]; then
+  echo -e "Starting Rope-Live..."
+  cd "$ROPE_LIVE_HOME"
+  nohup "$ROPE_PY" Rope.py >>"$STARTUPDIR/rope-live.log" 2>&1 &
+  echo "Rope-Live started in background (log: $STARTUPDIR/rope-live.log, PID $!)"
+else
+  echo "[rope-live] skipped: missing $ROPE_PY or ${ROPE_LIVE_HOME}/Rope.py — check /workspace/data/install.log"
+fi
 
 if [[ $DEBUG == true ]] || [[ $1 =~ -t|--tail-log ]]; then
     echo -e "\n------------------ $HOME/.vnc/*$DISPLAY.log ------------------"
