@@ -104,12 +104,15 @@ Set **`WORKSPACE_PYTHON_CACHE=0`** to skip sourcing `exports.env` (defaults to e
 
 ```text
 --privileged
--p 5901:5901 -p 6901:6901 -p 8080:8080 -p 8585:8585 -p 1935:1935 -p 8554:8554 -p 8890:8890/udp
+-p 5901:5901 -p 6901:6901 -p 8080:8080 -p 8585:8585 -p 1935:1935 -p 8554:8554
 -v <your-runpod-volume>:/workspace
 -e VNC_PASSWORDLESS=true
 -e INGEST_MODE=rtmp
+-e INGEST_ALLOW_NO_V4L2=1
 -e RTMP_PATH=live/ingest
 ```
+
+**Checklist:** **`--privileged`** helps **`v4l2loopback`** so **`/dev/video10`** exists and Rope sees a virtual cam. If modprobe still fails, **`INGEST_ALLOW_NO_V4L2=1`** (default in the image) keeps FFmpeg from stalling and still decodes your RTMP stream (Rope won’t get a camera). **Expose TCP `1935`** for Larix RTMP (mapped public port in `rtmp://IP:PORT/live/ingest`).
 
 ### Larix connection URL
 
@@ -126,7 +129,7 @@ Use the same path in **`RTMP_PATH`** (default `live/ingest`) if you change it. A
 - **Larix uses RTMP**, so expose **TCP container port `1935`** on Runpod and use the **mapped public port** in the URL (e.g. `rtmp://213.173.x.x:<external-1935>/live/ingest`).
 - **`8554` is RTSP**, not RTMP. A mapping like `213.173.x.x:18653 -> :8554` is for viewers (VLC, ffplay) with **`rtsp://213.173.x.x:18653/live/ingest`**, **not** for Larix.
 - **MediaMTX is in the image**; startup runs [`start-ingest.sh`](src/rope-live/start-ingest.sh) automatically unless `INGEST_MODE=off`. Ingest logs go to **`/dockerstartup/ingest.log`** and **`ingest-ffmpeg.log`**, and (after the latest startup script) are **teed to the container log** so Runpod’s log UI can show them.
-- Without a working **`/dev/video10`**, the script logs **`Waiting for /dev/video10`** in a loop; **FFmpeg will not pull** until then, but **MediaMTX can still accept** an RTMP publisher on **1935** if that port is reachable.
+- Without **`/dev/video10`**, set **`INGEST_ALLOW_NO_V4L2=1`** (default in image) so FFmpeg uses a **null** sink instead of waiting forever; **MediaMTX** can still accept RTMP on **1935**. For a real virtual camera in Rope, use **privileged** and working **v4l2loopback** so **`/dev/video10`** exists.
 
 ### Environment variables
 
@@ -134,6 +137,7 @@ Use the same path in **`RTMP_PATH`** (default `live/ingest`) if you change it. A
 |----------|---------|-------------|
 | `FACESWAP_BACKEND` | `rope-live` | Only `rope-live` is implemented; `deeplive` / `deepfacelive` exit with a clear error (future multi-backend phase). |
 | `INGEST_MODE` | `rtmp` | `rtmp` (FFmpeg reads RTSP from local MediaMTX), `srt`, or `off` to skip ingest. |
+| `INGEST_ALLOW_NO_V4L2` | `1` (image default) | If **`1`**, FFmpeg writes to a **null** sink when `/dev/video10` is missing (avoids infinite wait on Runpod without v4l2). Rope still needs real v4l2 for a camera. Set **`0`** to wait until `V4L2_DEVICE` exists. |
 | `RTMP_PATH` | `live/ingest` | Path name for RTMP publish and RTSP read. |
 | `INGEST_SOURCE_URL` | (built from mode) | Override FFmpeg input (e.g. custom SRT URL). |
 | `INGEST_SCALE` | `1280:720` | FFmpeg `scale=` before `v4l2`. |

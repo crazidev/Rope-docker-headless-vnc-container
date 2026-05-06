@@ -10,6 +10,9 @@ INGEST_SCALE="${INGEST_SCALE:-1280:720}"
 INGEST_FPS="${INGEST_FPS:-30}"
 # Set INGEST_LOW_LATENCY=1 for smaller FFmpeg demux/decode delay (tradeoff: less tolerant of jitter).
 INGEST_LOW_LATENCY="${INGEST_LOW_LATENCY:-0}"
+# Without v4l2 (e.g. Runpod not privileged), /dev/video10 never appears and FFmpeg would wait forever.
+# INGEST_ALLOW_NO_V4L2=1 decodes to a null sink so Larix→MediaMTX→FFmpeg still runs (no virtual cam for Rope).
+INGEST_ALLOW_NO_V4L2="${INGEST_ALLOW_NO_V4L2:-0}"
 
 if [ "$INGEST_MODE" = "off" ]; then
   echo "[ingest] INGEST_MODE=off, exiting ingest helper"
@@ -38,14 +41,22 @@ trap cleanup EXIT
 
 echo "[ingest] MediaMTX PID=$MTX_PID (RTMP :1935 RTSP :8554 SRT :8890 — see /etc/mediamtx.yml)"
 echo "[ingest] Publish from Larix: rtmp://<pod-ip>:1935/${RTMP_PATH}"
+if [[ "${INGEST_ALLOW_NO_V4L2}" == "1" ]]; then
+  echo "[ingest] INGEST_ALLOW_NO_V4L2=1: will decode to null if $V4L2_DEVICE is missing"
+fi
 
 while true; do
-  if [ ! -c "$V4L2_DEVICE" ]; then
-    echo "[ingest] Waiting for $V4L2_DEVICE ..."
+  if [[ -c "$V4L2_DEVICE" ]]; then
+    OUT=( -pix_fmt yuv420p -f v4l2 "$V4L2_DEVICE" )
+  elif [[ "${INGEST_ALLOW_NO_V4L2}" == "1" ]]; then
+    echo "[ingest] $V4L2_DEVICE missing — ffmpeg -> null (enable privileged+v4l2 for virtual cam)"
+    OUT=( -f null - )
+  else
+    echo "[ingest] Waiting for $V4L2_DEVICE ... (set INGEST_ALLOW_NO_V4L2=1 on Runpod if no v4l2)"
     sleep 2
     continue
   fi
-  # Reconnect loop until Larix publishes; scale for Rope-Live / virtual cam stability
+
   if [[ "$SOURCE_URL" == srt://* ]]; then
     FFIN=( -hide_banner -loglevel warning -y )
   else
@@ -57,7 +68,6 @@ while true; do
   FFIN+=( -i "$SOURCE_URL" )
   ffmpeg "${FFIN[@]}" \
     -vf "scale=${INGEST_SCALE}:flags=bilinear,fps=${INGEST_FPS}" \
-    -pix_fmt yuv420p \
-    -f v4l2 "$V4L2_DEVICE" 2>>"${STARTUPDIR:-/dockerstartup}/ingest-ffmpeg.log" || true
+    "${OUT[@]}" 2>>"${STARTUPDIR:-/dockerstartup}/ingest-ffmpeg.log" || true
   sleep 1
 done

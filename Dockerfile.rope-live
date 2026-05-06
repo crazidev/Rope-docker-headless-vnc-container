@@ -33,6 +33,7 @@ ENV DISPLAY=:1 \
     ROPE_LIVE_HOME=/workspace/data/Rope-Live \
     FACESWAP_BACKEND=rope-live \
     INGEST_MODE=rtmp \
+    INGEST_ALLOW_NO_V4L2=1 \
     RTMP_PATH=live/ingest \
     V4L2_DEVICE=/dev/video10
 
