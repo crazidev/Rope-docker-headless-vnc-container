@@ -141,7 +141,9 @@ bash "$STARTUPDIR/setup-v4l2.sh"
 
 if [[ "${INGEST_MODE:-rtmp}" != "off" ]]; then
   echo -e "\n------------------ Larix ingest (MediaMTX + FFmpeg) ------------------"
-  bash "$STARTUPDIR/start-ingest.sh" >>"$STARTUPDIR/ingest.log" 2>&1 &
+  echo "[ingest] Logs also in $STARTUPDIR/ingest.log and ingest-ffmpeg.log (Larix needs TCP **1935** RTMP, not 8554)"
+  # Tee to container stderr so Runpod / docker logs show mediamtx + ingest status (not just a file).
+  bash "$STARTUPDIR/start-ingest.sh" 2>&1 | tee -a "$STARTUPDIR/ingest.log" | tee /dev/stderr &
 fi
 
 echo -e "\n------------------ Jupyter + Rope-Live (after runtime install finishes) ------------------"

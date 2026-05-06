@@ -121,6 +121,13 @@ rtmp://<pod-public-host>:1935/live/ingest
 
 Use the same path in **`RTMP_PATH`** (default `live/ingest`) if you change it. After Larix connects, FFmpeg inside the container pulls **`rtsp://127.0.0.1:8554/${RTMP_PATH}`** and writes **YUV420P** to **`V4L2_DEVICE`** (default `/dev/video10`).
 
+### Runpod: which port for Larix?
+
+- **Larix uses RTMP**, so expose **TCP container port `1935`** on Runpod and use the **mapped public port** in the URL (e.g. `rtmp://213.173.x.x:<external-1935>/live/ingest`).
+- **`8554` is RTSP**, not RTMP. A mapping like `213.173.x.x:18653 -> :8554` is for viewers (VLC, ffplay) with **`rtsp://213.173.x.x:18653/live/ingest`**, **not** for Larix.
+- **MediaMTX is in the image**; startup runs [`start-ingest.sh`](src/rope-live/start-ingest.sh) automatically unless `INGEST_MODE=off`. Ingest logs go to **`/dockerstartup/ingest.log`** and **`ingest-ffmpeg.log`**, and (after the latest startup script) are **teed to the container log** so Runpod’s log UI can show them.
+- Without a working **`/dev/video10`**, the script logs **`Waiting for /dev/video10`** in a loop; **FFmpeg will not pull** until then, but **MediaMTX can still accept** an RTMP publisher on **1935** if that port is reachable.
+
 ### Environment variables
 
 | Variable | Default | Description |
