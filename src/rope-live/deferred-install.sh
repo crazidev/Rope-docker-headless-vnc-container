@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# First boot: conda env on /workspace, Rope-Live clone, pip + Jupyter — streams to install.log and stdout (Runpod).
+# First boot: conda env on /workspace, Rope-Live clone, pip + Jupyter.
+# apt, conda env creation, and git clone run in parallel where safe; pip runs once (req + jupyterlab).
 set -euo pipefail
 
 STARTUPDIR="${STARTUPDIR:-/dockerstartup}"
@@ -11,7 +12,7 @@ ROPE_LIVE_GIT="${ROPE_LIVE_GIT:-https://github.com/argenspin/Rope-Live.git}"
 MODELS_DIR="${WORKSPACE_MODELS:-/workspace/data/models}"
 INSTALL_TENSORRT="${INSTALL_TENSORRT:-0}"
 
-mkdir -p "$(dirname "$LOG")" "$CONDA_ENV_PREFIX" "$(dirname "$ROPE_LIVE_HOME")"
+mkdir -p "$(dirname "$LOG")" "$(dirname "$CONDA_ENV_PREFIX")" "$(dirname "$ROPE_LIVE_HOME")"
 
 if [[ "${SKIP_WORKSPACE_INSTALL:-0}" == "1" ]]; then
   echo "[runtime-install] SKIP_WORKSPACE_INSTALL=1"
@@ -31,33 +32,55 @@ echo "========== Rope-Live runtime install started $(date -Is) =========="
 
 source /opt/conda/etc/profile.d/conda.sh
 
-export DEBIAN_FRONTEND=noninteractive
-echo "[runtime-install] apt: build-essential, git"
-apt-get update -qq
-apt-get install -y --no-install-recommends build-essential git
-
-echo "[runtime-install] conda ToS + env at $CONDA_ENV_PREFIX"
+echo "[runtime-install] conda ToS (required before conda create)"
 conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
 conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
 
-if [[ ! -x "${CONDA_ENV_PREFIX}/bin/python" ]]; then
-  conda create -y -p "$CONDA_ENV_PREFIX" python=3.10.13
-fi
-conda clean -afy 2>/dev/null || true
+export DEBIAN_FRONTEND=noninteractive
+
+echo "[runtime-install] parallel phase: apt (build tools) | conda env | git clone Rope-Live"
+
+(
+  set -e
+  echo "[apt] start $(date -Is)"
+  apt-get update -qq
+  apt-get install -y --no-install-recommends build-essential git
+  echo "[apt] done $(date -Is)"
+) &
+APT_PID=$!
+
+(
+  set -e
+  echo "[conda] env $CONDA_ENV_PREFIX start $(date -Is)"
+  if [[ ! -x "${CONDA_ENV_PREFIX}/bin/python" ]]; then
+    conda create -y -p "$CONDA_ENV_PREFIX" python=3.10.13
+  fi
+  conda clean -afy 2>/dev/null || true
+  echo "[conda] done $(date -Is)"
+) &
+CONDA_PID=$!
+
+(
+  set -e
+  echo "[git] clone -> $ROPE_LIVE_HOME start $(date -Is)"
+  if [[ ! -f "${ROPE_LIVE_HOME}/Rope.py" ]]; then
+    rm -rf "$ROPE_LIVE_HOME"
+    git clone --depth 1 "$ROPE_LIVE_GIT" "$ROPE_LIVE_HOME"
+  fi
+  echo "[git] done $(date -Is)"
+) &
+GIT_PID=$!
+
+ec=0
+wait "$APT_PID" || { echo "[runtime-install] ERROR: apt phase failed"; ec=1; }
+wait "$CONDA_PID" || { echo "[runtime-install] ERROR: conda phase failed"; ec=1; }
+wait "$GIT_PID" || { echo "[runtime-install] ERROR: git phase failed"; ec=1; }
+[[ "$ec" -eq 0 ]] || exit 1
 
 export PATH="${CONDA_ENV_PREFIX}/bin:/opt/conda/bin:$PATH"
 
-echo "[runtime-install] git clone Rope-Live -> $ROPE_LIVE_HOME"
-if [[ ! -f "${ROPE_LIVE_HOME}/Rope.py" ]]; then
-  rm -rf "$ROPE_LIVE_HOME"
-  git clone --depth 1 "$ROPE_LIVE_GIT" "$ROPE_LIVE_HOME"
-fi
-
-echo "[runtime-install] pip install Rope-Live requirements (long)"
+echo "[runtime-install] pip: Rope-Live requirements + JupyterLab (single resolver) $(date -Is)"
 bash "$STARTUPDIR/install-rope-live-pip.sh"
-
-echo "[runtime-install] JupyterLab"
-pip install jupyterlab
 
 echo "[runtime-install] models symlink -> $MODELS_DIR"
 mkdir -p "$MODELS_DIR"

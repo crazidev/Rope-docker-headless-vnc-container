@@ -11,4 +11,4 @@ else
   grep -vE '^[[:space:]]*tensorrt([[:space:]]|$)' requirements.txt >"$req" || cp requirements.txt "$req"
 fi
 
-pip install --no-cache-dir -r "$req"
+pip install --no-cache-dir jupyterlab -r "$req"
