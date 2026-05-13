@@ -114,8 +114,11 @@ echo -e "\nVNCSERVER started on DISPLAY= $DISPLAY \n\t=> connect via VNC viewer 
 echo -e "\nnoVNC HTML client started:\n\t=> connect via http://$VNC_IP:$NO_VNC_PORT/?password=...\n"
 echo -e "Starting jupyterlab at port 8080..."
 nohup jupyter lab --port 8080 --notebook-dir=/workspace --allow-root --no-browser --ip=0.0.0.0  --NotebookApp.token='' --NotebookApp.password='' &
-echo -e "Starting Rope..."
-python /workspace/Rope/Rope.py
+DFL_HOME="${DFL_DEEPFACELIVE_HOME:-/workspace/DeepFaceLive}"
+mkdir -p /data
+echo -e "Starting DeepFaceLive (userdata /data, repo $DFL_HOME)..."
+cd "$DFL_HOME"
+python main.py run DeepFaceLive --userdata-dir /data/
 
 if [[ $DEBUG == true ]] || [[ $1 =~ -t|--tail-log ]]; then
     echo -e "\n------------------ $HOME/.vnc/*$DISPLAY.log ------------------"

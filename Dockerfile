@@ -2,19 +2,20 @@ FROM nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04
 
 ENV REFRESHED_AT 2024-08-12
 
-LABEL io.k8s.description="Headless VNC Container with Xfce window manager, firefox and chromium" \
-      io.k8s.display-name="Headless VNC Container based on Debian" \
-      io.openshift.expose-services="6901:http,5901:xvnc" \
-      io.openshift.tags="vnc, debian, xfce" \
+LABEL io.k8s.description="Headless VNC with DeepFaceLive (crazidev fork), Xfce, noVNC" \
+      io.k8s.display-name="DeepFaceLive headless VNC" \
+      io.openshift.expose-services="6901:http,5901:xvnc,1238:udp-stream,8888:srt,1935:rtmp,8554:rtsp" \
+      io.openshift.tags="vnc,deepfacelive,xfce,cuda" \
       io.openshift.non-scalable=true
 
 ### Connection ports for controlling the UI:
 ### VNC port:5901
 ### noVNC webport, connect via http://IP:6901/?password=vncpassword
+### DeepFaceLive stream defaults (override via env): UDP 1238, SRT 8888, RTMP 1935, RTSP 8554 — see .env in upstream repo
 ENV DISPLAY=:1 \
     VNC_PORT=5901 \
     NO_VNC_PORT=6901
-EXPOSE $VNC_PORT $NO_VNC_PORT
+EXPOSE $VNC_PORT $NO_VNC_PORT 8080/tcp 8585/tcp 1238/udp 8888/tcp 1935/tcp 8554/tcp
 
 ### Envrionment config
 ENV HOME=/workspace \
@@ -77,6 +78,9 @@ RUN $INST_SCRIPTS/firefox.sh
 RUN $INST_SCRIPTS/xfce_ui.sh
 ADD ./src/common/xfce/ $HOME/
 
+### PyQt6 / OpenCV runtime libs for DeepFaceLive
+RUN $INST_SCRIPTS/deepfacelive_apt.sh
+
 ### configure startup
 RUN $INST_SCRIPTS/libnss_wrapper.sh
 ADD ./src/common/scripts $STARTUPDIR
@@ -85,34 +89,35 @@ RUN $INST_SCRIPTS/set_user_permission.sh $STARTUPDIR $HOME
 ### Create conda environment (accept Anaconda channel ToS for non-interactive builds)
 RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main && \
     conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r && \
-    conda create -n Rope python=3.10.13 -y && conda clean --all -y
+    conda create -n DeepFaceLive python=3.10.13 -y && conda clean --all -y
 
 ### Activate the environment
-ENV CONDA_DEFAULT_ENV Rope
+ENV CONDA_DEFAULT_ENV=DeepFaceLive
 RUN echo "source activate $CONDA_DEFAULT_ENV" >> ~/.bashrc
-ENV PATH /opt/conda/envs/$CONDA_DEFAULT_ENV/bin:$PATH
+ENV PATH=/opt/conda/envs/$CONDA_DEFAULT_ENV/bin:$PATH
 
-### Install Rope
+### DeepFaceLive (userdata and models on /data — mount a volume at runtime)
+ENV DFL_STREAM_BIND_HOST=0.0.0.0 \
+    DFL_STREAM_PORT_UDP=1238 \
+    DFL_STREAM_PORT_SRT=8888 \
+    DFL_STREAM_PORT_RTMP=1935 \
+    DFL_STREAM_PORT_RTSP=8554 \
+    DFL_STREAM_PROTOCOL=udp \
+    DFL_DEEPFACELIVE_HOME=/workspace/DeepFaceLive \
+    QT_QPA_PLATFORM=xcb
+
 WORKDIR /workspace
-RUN git clone https://github.com/Hillobar/Rope.git
-WORKDIR /workspace/Rope
+RUN git clone --depth 1 https://github.com/crazidev/DeepFaceLive.git DeepFaceLive
+WORKDIR /workspace/DeepFaceLive
 
-### Install dependencies. Fix Models.py backslash path
-RUN pip install -r ./requirements.txt --no-cache-dir
-COPY ./src/Models.py /workspace/Rope/rope/Models.py
-
-### Download models
-WORKDIR /workspace/Rope/models
-RUN wget -qO- https://api.github.com/repos/Hillobar/Rope/releases/tags/Sapphire | jq -r '.assets[] | .browser_download_url' | xargs -n 1 wget
-WORKDIR /workspace/Rope
+COPY ./src/deepfacelive/requirements-gpu.txt /tmp/requirements-gpu.txt
+RUN pip install --upgrade pip && pip install --no-cache-dir -r /tmp/requirements-gpu.txt
 
 ### Install jupyterlab
 RUN pip install jupyterlab
-EXPOSE 8080
 
 ### Install filebrowser
 RUN wget -O - https://raw.githubusercontent.com/filebrowser/get/master/get.sh | bash
-EXPOSE 8585
 
 ### Reconfigure startup
 COPY ./src/vnc_startup_jupyterlab_filebrowser.sh /dockerstartup/vnc_startup.sh
