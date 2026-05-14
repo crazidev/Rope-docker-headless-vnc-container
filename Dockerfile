@@ -1,21 +1,26 @@
 FROM nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04
 
-ENV REFRESHED_AT 2024-08-12
+ENV REFRESHED_AT=2024-08-12
 
 LABEL io.k8s.description="Headless VNC with DeepFaceLive (crazidev fork), Xfce, noVNC" \
       io.k8s.display-name="DeepFaceLive headless VNC" \
-      io.openshift.expose-services="6901:http,5901:xvnc,1238:udp-stream,8888:srt,1935:rtmp,8554:rtsp" \
+      io.openshift.expose-services="6901:http,5901:xvnc,1234:udp-out,18766:udp-in,8890:srt,1935:rtmp,8554:rtsp" \
       io.openshift.tags="vnc,deepfacelive,xfce,cuda" \
       io.openshift.non-scalable=true
 
 ### Connection ports for controlling the UI:
 ### VNC port:5901
 ### noVNC webport, connect via http://IP:6901/?password=vncpassword
-### DeepFaceLive stream defaults (override via env): UDP 1238, SRT 8888, RTMP 1935, RTSP 8554 — see .env in upstream repo
+### DeepFaceLive streaming: set DFL_* on the host (e.g. RunPod). Typical mapping:
+###   UDP 1234  DFL_OUTPUT_STREAM_UDP_PORT (stream out)
+###   UDP 18766 DFL_STREAM_PORT_UDP (network in)
+###   UDP 8890  DFL_STREAM_PORT_SRT (if using SRT)
+###   TCP 1935  DFL_STREAM_PORT_RTMP (if using RTMP)
+###   TCP 8554  DFL_STREAM_PORT_RTSP (if using RTSP)
 ENV DISPLAY=:1 \
     VNC_PORT=5901 \
     NO_VNC_PORT=6901
-EXPOSE $VNC_PORT $NO_VNC_PORT 8080/tcp 8585/tcp 1238/udp 8888/tcp 1935/tcp 8554/tcp
+EXPOSE $VNC_PORT $NO_VNC_PORT 8080/tcp 8585/tcp 1234/udp 18766/udp 8890/udp 1935/tcp 8554/tcp
 
 ### Envrionment config
 ENV HOME=/workspace \
@@ -53,7 +58,7 @@ bash miniconda.sh -b -p /opt/conda && \
 rm miniconda.sh
 
 ### Add Conda to the PATH
-ENV PATH /opt/conda/bin:$PATH
+ENV PATH=/opt/conda/bin:$PATH
 
 ### Add all install scripts for further steps
 ADD ./src/common/install/ $INST_SCRIPTS/
@@ -96,14 +101,8 @@ ENV CONDA_DEFAULT_ENV=DeepFaceLive
 RUN echo "source activate $CONDA_DEFAULT_ENV" >> ~/.bashrc
 ENV PATH=/opt/conda/envs/$CONDA_DEFAULT_ENV/bin:$PATH
 
-### DeepFaceLive (userdata and models on /data — mount a volume at runtime)
-ENV DFL_STREAM_BIND_HOST=0.0.0.0 \
-    DFL_STREAM_PORT_UDP=1238 \
-    DFL_STREAM_PORT_SRT=8888 \
-    DFL_STREAM_PORT_RTMP=1935 \
-    DFL_STREAM_PORT_RTSP=8554 \
-    DFL_STREAM_PROTOCOL=udp \
-    DFL_DEEPFACELIVE_HOME=/workspace/DeepFaceLive \
+### DeepFaceLive install path (stream bind/ports/protocol: inject at runtime, e.g. RunPod — not set here)
+ENV DFL_DEEPFACELIVE_HOME=/workspace/DeepFaceLive \
     QT_QPA_PLATFORM=xcb
 
 WORKDIR /workspace
@@ -112,6 +111,9 @@ WORKDIR /workspace/DeepFaceLive
 
 COPY ./src/deepfacelive/requirements-gpu.txt /tmp/requirements-gpu.txt
 RUN pip install --upgrade pip && pip install --no-cache-dir -r /tmp/requirements-gpu.txt
+
+### Userdata under repo: seed animatables + samples from build/ (startup re-seeds if volume replaces data/)
+RUN mkdir -p data && cp -a build/animatables build/samples data/
 
 ### Install jupyterlab
 RUN pip install jupyterlab

@@ -117,10 +117,16 @@ nohup jupyter lab --port 8080 --notebook-dir=/workspace --allow-root --no-browse
 echo -e "Starting filebrowser at port 8585..."
 nohup filebrowser -r /workspace -p 8585 -a 0.0.0.0 --noauth &
 DFL_HOME="${DFL_DEEPFACELIVE_HOME:-/workspace/DeepFaceLive}"
-mkdir -p /data
-echo -e "Starting DeepFaceLive (userdata /data, repo $DFL_HOME)..."
+DFL_DATA="${DFL_USERDATA_DIR:-$DFL_HOME/data}"
+mkdir -p "$DFL_DATA"
+for d in animatables samples; do
+  if [[ -d "$DFL_HOME/build/$d" ]] && [[ ! -d "$DFL_DATA/$d" ]]; then
+    cp -a "$DFL_HOME/build/$d" "$DFL_DATA/"
+  fi
+done
+echo -e "Starting DeepFaceLive (userdata $DFL_DATA)..."
 cd "$DFL_HOME"
-python main.py run DeepFaceLive --userdata-dir /data/
+python main.py run DeepFaceLive --userdata-dir "$DFL_DATA/"
 
 if [[ $DEBUG == true ]] || [[ $1 =~ -t|--tail-log ]]; then
     echo -e "\n------------------ $HOME/.vnc/*$DISPLAY.log ------------------"
