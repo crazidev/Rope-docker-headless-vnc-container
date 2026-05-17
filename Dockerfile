@@ -4,7 +4,7 @@ ENV REFRESHED_AT=2024-08-12
 
 LABEL io.k8s.description="Headless VNC with DeepFaceLive (crazidev fork), Xfce, noVNC" \
       io.k8s.display-name="DeepFaceLive headless VNC" \
-      io.openshift.expose-services="6901:http,5901:xvnc,1234:udp-out,18766:udp-in,8890:srt,1935:rtmp,8554:rtsp" \
+      io.openshift.expose-services="6901:http,5901:xvnc,1234:udp-out,18766:udp-in,8890:srt,1935:rtmp,8554:rtsp,9090:http,10000:webrtc" \
       io.openshift.tags="vnc,deepfacelive,xfce,cuda" \
       io.openshift.non-scalable=true
 
@@ -17,10 +17,13 @@ LABEL io.k8s.description="Headless VNC with DeepFaceLive (crazidev fork), Xfce, 
 ###   UDP 8890  DFL_STREAM_PORT_SRT (if using SRT)
 ###   TCP 1935  DFL_STREAM_PORT_RTMP (if using RTMP)
 ###   TCP 8554  DFL_STREAM_PORT_RTSP (if using RTSP)
+###   TCP 9090  DFL_WEBRTC_PORT (WebRTC Signaling & WebApp)
+###   UDP 10000 WebRTC Video Channel (Method A direct)
+###   TCP 10000 WebRTC Video Channel Backup (Method A TCP)
 ENV DISPLAY=:1 \
     VNC_PORT=5901 \
     NO_VNC_PORT=6901
-EXPOSE $VNC_PORT $NO_VNC_PORT 8080/tcp 8585/tcp 1234/udp 18766/udp 8890/udp 1935/tcp 8554/tcp
+EXPOSE $VNC_PORT $NO_VNC_PORT 8080/tcp 8585/tcp 1234/udp 18766/udp 8890/udp 1935/tcp 8554/tcp 9090/tcp 10000/tcp 10000/udp
 
 ### Envrionment config
 ENV HOME=/workspace \

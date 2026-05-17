@@ -95,6 +95,8 @@ Set **`WORKSPACE_PYTHON_CACHE=0`** to skip sourcing `exports.env` (defaults to e
 | 1935 | TCP | RTMP ingest (Larix → MediaMTX) |
 | 8554 | TCP | RTSP (FFmpeg reads `rtsp://127.0.0.1:8554/<path>` inside the container) |
 | 8890 | UDP | SRT (optional; set `INGEST_MODE=srt` or override `INGEST_SOURCE_URL`) |
+| 9090 | TCP | WebRTC Signaling & WebApp Interface (for browser camera streaming) |
+| 10000 | UDP/TCP | WebRTC Direct Media Channel (Method A fallback option) |
 
 ### Runpod and `/workspace`
 
@@ -104,7 +106,7 @@ Set **`WORKSPACE_PYTHON_CACHE=0`** to skip sourcing `exports.env` (defaults to e
 
 ```text
 --privileged
--p 5901:5901 -p 6901:6901 -p 8080:8080 -p 8585:8585 -p 1935:1935 -p 8554:8554
+-p 5901:5901 -p 6901:6901 -p 8080:8080 -p 8585:8585 -p 1935:1935 -p 8554:8554 -p 9090:9090 -p 10000:10000 -p 10000:10000/udp
 -v <your-runpod-volume>:/workspace
 -e VNC_PASSWORDLESS=true
 -e INGEST_MODE=rtmp
